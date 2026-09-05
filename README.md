@@ -320,20 +320,6 @@ and replace it with your own key.
 
 The application requires a valid API key before processing begins.
 
-## ⚠️ GitHub warning
-
-The personal-use version keeps the API key directly in the Python file.
-
-**Never publish your real API key in a public repository.**
-
-Before pushing to GitHub:
-
-```python
-API_KEY = "YOUR_STEAMGRIDDB_API_KEY_HERE"
-```
-
-If a real key has already been exposed publicly, revoke/rotate it.
-
 ---
 
 # ▶️ Running the Downloader
@@ -791,39 +777,6 @@ If the matcher cannot reach the configured confidence threshold, the title is fa
 
 ---
 
-# 🌐 GitHub Publishing
-
-A public repository should normally contain only the source and documentation, for example:
-
-```text
-downloader_final.py
-README.md
-LICENSE
-.gitignore
-```
-
-Avoid committing personal generated data such as downloaded covers and private game lists unless you intentionally want to publish them.
-
-A suitable `.gitignore` includes:
-
-```gitignore
-__pycache__/
-*.py[cod]
-
-covers/
-*.part
-
-.venv/
-venv/
-env/
-
-.idea/
-.vscode/
-
-Thumbs.db
-.DS_Store
-```
-
 ### 🔐 API key
 
 Before publishing, remove your real SteamGridDB API key from the source.
@@ -857,37 +810,6 @@ You are responsible for:
 
 ---
 
-# 🤝 Contributing
-
-Contributions are welcome.
-
-Potential improvements include:
-
-- Better title normalization
-- Additional artwork ranking signals
-- More metadata caching
-- Improved image validation
-- More CLI options
-- Automated tests
-- Better reporting
-- Additional platform presets
-
----
-
-# ⭐ Project Philosophy
-
-The project follows a simple rule:
-
-> **A missing cover is better than silently assigning the wrong cover.**
-
-The downloader therefore prioritizes:
-
-**Accuracy → Reliability → Resumability → Efficiency**
-
-rather than blindly maximizing request speed.
-
----
-
 # 📚 Links
 
 - SteamGridDB: https://www.steamgriddb.com/
@@ -896,11 +818,5 @@ rather than blindly maximizing request speed.
 - Requests: https://requests.readthedocs.io/
 
 ---
-
-## Current Version
-
-```text
-2.x
-```
 
 The project version refers to this downloader implementation and is independent of the SteamGridDB API version.
