@@ -246,7 +246,7 @@ Press Enter to exit...
 
 ## ⚖️ License & Disclaimer
 
-Source code may be distributed under the **MIT License** (if a `LICENSE` file is included) — this does **not** grant rights to third-party artwork downloaded from SteamGridDB. Artwork, titles, logos, and trademarks remain subject to their respective owners.
+Source code may be distributed under the **MIT License** — this does **not** grant rights to third-party artwork downloaded from SteamGridDB. Artwork, titles, logos, and trademarks remain subject to their respective owners.
 
 This is an independent automation tool, not affiliated with SteamGridDB. You're responsible for your API usage, credentials, downloaded artwork, and compliance with SteamGridDB's current terms and applicable copyright/trademark law.
 
