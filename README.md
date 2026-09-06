@@ -2,821 +2,257 @@
 
 A reliable Python tool for downloading **square (1:1) game artwork** from [SteamGridDB](https://www.steamgriddb.com/) using simple text-based game lists.
 
-It is designed for large personal game libraries such as **PS4, PS5, Xbox One, and Xbox Series X|S**, with an emphasis on accurate game matching, square artwork, resumability, duplicate detection, retries, and organized output.
+Built for large personal game libraries such as **PS4, PS5, Xbox One, and Xbox Series X|S** — with accurate game matching, square-only artwork, resumability, safe duplicate handling, retries, and organized per-list output.
 
-> **Important:** This project automates access to SteamGridDB. You are responsible for complying with SteamGridDB's current API policies/terms and for the rights applicable to any downloaded artwork.
+> **Important:** This project automates access to SteamGridDB. You are responsible for complying with SteamGridDB's API policies/terms and for the rights applicable to any downloaded artwork.
 
 ---
 
 ## ✨ Features
 
 ### 🎮 Smart game-name matching
+The downloader never blindly trusts the first autocomplete result. It scores several search candidates using character similarity, substring matching, initialisms (e.g. `re4` → *Resident Evil 4*), and alternate names, then picks the best match above a configurable confidence threshold.
 
-The downloader does **not** blindly trust the first autocomplete result.
+If nothing reaches that threshold, the game is reported as **not found** — the tool never guesses and silently attaches a possibly wrong cover. A missing cover you can fix is always better than a wrong one you won't notice.
 
-It evaluates up to several search candidates using:
-
-- Character similarity
-- Substring matching
-- Initialism matching
-- Alternate names when supplied by the API
-- A configurable minimum confidence threshold
-
-If no candidate reaches the required confidence, the game is treated as **not found** instead of guessing.
-
-The design intentionally prefers a missing cover over silently assigning the wrong game's cover.
-
-### 🖼️ Square 1:1 covers
-
-Only square artwork is accepted.
-
-The preferred resolutions are:
-
-```text
-1024 × 1024
-512 × 512
-```
-
-Other square resolutions may remain eligible depending on configuration.
-
-Portrait Steam-style artwork is rejected when it is not square.
+### 🖼️ Square 1:1 covers only
+Preferred resolutions: `1024×1024`, then `512×512`. Other square sizes stay eligible depending on config; non-square artwork is always rejected.
 
 ### ⭐ Artwork quality ranking
-
-When multiple eligible grids exist, the downloader ranks them using several signals:
-
-1. Square dimensions
-2. `1024×1024` preference over `512×512`
-3. SteamGridDB score when available
-4. Artwork style
-5. Static artwork preference
-6. English metadata preference when available
+Eligible grids are ranked by resolution, SteamGridDB score, artwork style, static-vs-animated, and English metadata — the highest-ranked one is downloaded.
 
 ### ⚡ Controlled parallel processing
-
-Games are processed concurrently with a configurable worker count.
-
-Default:
-
-```python
-MAX_WORKERS = 4
-```
-
-You can override it:
-
-```bash
-python downloader_final.py --workers 6
-```
+Configurable worker count (default `4`), overridable with `--workers N`. Per-worker request pacing keeps API usage polite without stalling job dispatch.
 
 ### 🔁 Automatic retries
-
-Transient network/server failures are retried automatically.
-
-Common retryable conditions include:
-
-- Connection failures
-- Read failures
-- HTTP `429`
-- HTTP `500`
-- HTTP `502`
-- HTTP `503`
-- HTTP `504`
+Transient failures (connection issues, `429`, `500–504`) are retried automatically with backoff.
 
 ### 💾 Persistent state and resume
+`covers/_state.json` tracks every processed game **per list** — the same game title in two different lists is tracked and downloaded independently, so one list's progress never gets confused with another's. State is flushed periodically during a run (not after every single game) and always flushed on exit, including on Ctrl+C or a crash.
 
-The program maintains:
+### ♻️ Space-saving duplicate detection
+If the same official game already has a cover downloaded somewhere else in `covers/`, the tool reuses it instead of downloading a second copy — backed by an in-memory index so this check stays fast even on huge libraries. Every reuse is logged centrally (see below) so you always know exactly where the real file lives.
 
-```text
-covers/_state.json
-```
-
-This keeps a persistent registry of processed games and their downloaded covers.
-
-The state is periodically written during long runs and flushed again when processing exits.
-
-### ♻️ Duplicate/shared-cover detection
-
-The program builds an in-memory index of existing PNG covers.
-
-This allows it to efficiently detect a cover that already exists elsewhere in the `covers/` directory without repeatedly scanning the entire output tree for every game.
+### 📝 Centralized shared-cover report
+Instead of a separate log buried in every list folder, all shared-cover events are collected in one place:
+- `covers/_shared_covers_report.txt` — raw log of every reuse event.
+- `covers/_shared_covers_summary.txt` — generated at the end of each run, grouped by real file, showing exactly which lists need a copy of which cover.
 
 ### 📝 Failed-game logs
-
-Each list gets its own:
-
-```text
-covers/<list-name>/_failed_games.txt
-```
-
-Typical reasons include:
-
-```text
-Not found in SteamGridDB
-No valid square (1:1) cover found
-Selected grid has no image URL
-Download failed: ...
-Network error: ...
-```
-
-### 🔄 Retry only failed games
-
-Use:
-
-```bash
-python downloader_final.py --mode retry
-```
-
-to process only games currently present in the failure logs.
-
-After a successful retry, that failure entry is removed.
+Each list gets its own `covers/<list-name>/_failed_games.txt` with the reason (not found, no valid square cover, download error, etc.). Use `--mode retry` to reprocess only these.
 
 ### 🧪 Image validation
+Every downloaded file is checked before being kept: not empty, not suspiciously small, a recognizable format (PNG/JPEG/GIF/WEBP), and square. Files are written atomically (temp file + rename) so a crash mid-download never leaves a corrupt cover in place.
 
-Downloaded images are inspected before being kept.
-
-The program validates that:
-
-- The response is not empty
-- The file is not obviously too small
-- The image format can be recognized
-- Image dimensions can be read
-- Width and height are equal
-
-Common image headers supported by the validator include PNG, JPEG, GIF, and WEBP.
+### 🖥️ Stays open when done
+The console window doesn't just close after finishing. It prints a final summary and waits for `Enter` before exiting — including after an unexpected error, so nothing flashes by unread. This is skipped automatically when run non-interactively (scripts, CI).
 
 ### 📦 Four operating modes
 
 | Mode | Purpose |
 |---|---|
 | `full` | Process every game in the current lists |
-| `retry` | Retry games recorded in failed logs |
-| `missing` | Process games without a currently registered/local cover |
-| `redownload` | Process every game again and fetch fresh artwork |
+| `retry` | Retry only games recorded in failed logs |
+| `missing` | Process only games without a currently registered/local cover |
+| `redownload` | Force-refresh every game's artwork |
 
 ---
 
-# 📦 Requirements
+## 📦 Requirements
 
 - Windows, Linux, or macOS
 - Python **3.9+**
-- Internet connection
-- SteamGridDB API key
-- Python package `requests`
+- Internet connection + SteamGridDB API key
+- `requests` package
 
-No database server, Node.js, PHP, or web server is required.
-
----
-
-# 🚀 Installation
-
-## 1. Install Python
-
-Download Python from:
-
-https://www.python.org/downloads/
-
-On Windows, enable:
-
-```text
-Add Python to PATH
-```
-
-Verify the installation:
-
-```bash
-python --version
-```
-
-On some systems:
-
-```bash
-python3 --version
-```
+No database, Node.js, PHP, or web server needed.
 
 ---
 
-## 2. Install Requests
-
-Inside the project directory:
+## 🚀 Installation
 
 ```bash
 pip install requests
 ```
 
-If `pip` is not available:
-
-```bash
-python -m pip install requests
-```
-
-Linux/macOS:
-
-```bash
-python3 -m pip install requests
-```
+(or `python -m pip install requests` if `pip` isn't directly available)
 
 ---
 
-# 📁 Project Setup
+## 📁 Setup
 
-A minimal project can contain only:
+A minimal project needs only:
 
 ```text
 steamgriddb-downloader/
 └── downloader_final.py
 ```
 
-Run:
+Run it once:
 
 ```bash
 python downloader_final.py
 ```
 
-The program creates the required directories when needed.
+Required folders (`lists/`, `covers/`) are created automatically. If no list files exist yet, sample ones are generated for you (`ps5.txt`, `ps4.txt`, `xbox_one.txt`, `xbox_sx.txt`) — add your games and run again.
 
 ---
 
-# 🗂️ Automatic list creation
+## 📝 Creating game lists
 
-If `lists/` does not exist, it is created automatically.
-
-If no list files are found, the program creates:
+One `.txt` file per platform/collection, one game per line:
 
 ```text
-lists/
-├── ps5.txt
-├── ps4.txt
-├── xbox_one.txt
-└── xbox_sx.txt
-```
-
-The `covers/` directory is also created automatically.
-
-Then:
-
-1. Open the generated `.txt` files
-2. Add your game names
-3. Save the files
-4. Run the downloader again
-
----
-
-# 📝 Creating game lists
-
-Use one `.txt` file per platform or collection.
-
-Example:
-
-```text
-lists/
-├── ps5.txt
-├── ps4.txt
-├── xbox_one.txt
-└── xbox_sx.txt
-```
-
-Put **one game title per line**.
-
-Example:
-
-```text
-Astro Bot
-Black Myth: Wukong
-Demon's Souls
-God of War Ragnarök
-Marvel's Spider-Man 2
-Ratchet & Clank: Rift Apart
-```
-
-Blank lines are ignored.
-
-Lines beginning with `#` are ignored as comments:
-
-```text
+lists/ps5.txt
+------------------
 # My PS5 collection
-
 Astro Bot
 Demon's Souls
 Marvel's Spider-Man 2
 ```
 
+Blank lines and lines starting with `#` are ignored.
+
 ---
 
-# 🔑 SteamGridDB API Key
+## 🔑 API Key
 
-Open:
-
-```text
-downloader_final.py
-```
-
-Find:
+Open `downloader_final.py` and set:
 
 ```python
 API_KEY = "YOUR_STEAMGRIDDB_API_KEY_HERE"
 ```
 
-and replace it with your own key.
-
-The application requires a valid API key before processing begins.
+A valid key is required before processing begins.
 
 ---
 
-# ▶️ Running the Downloader
-
-Run:
+## ▶️ Running
 
 ```bash
 python downloader_final.py
 ```
 
-Without a mode argument, the program shows:
-
-```text
-1) Full Run      - Process everything
-2) Retry Failed  - Retry only failed games
-3) Only Missing  - Download missing covers
-4) Re-download   - Re-download everything
-```
-
----
-
-# 🟢 First Run
-
-For a new collection, choose:
-
-```text
-1
-```
-
-or run directly:
+Without `--mode`, an interactive menu lets you pick Full / Retry / Missing / Re-download. Or specify directly:
 
 ```bash
 python downloader_final.py --mode full
-```
-
-The downloader will:
-
-1. Read all text lists from `lists/`
-2. Ignore blank lines and comments
-3. Sort lists by number of games
-4. Search SteamGridDB
-5. Match the intended game
-6. Fetch square grid artwork
-7. Rank eligible covers
-8. Download the selected image
-9. Validate the image
-10. Save the cover
-11. Update persistent state
-12. Record failures where necessary
-
----
-
-# 🔄 Run Modes
-
-## Full Run
-
-```bash
-python downloader_final.py --mode full
-```
-
-Processes all games in the current lists.
-
----
-
-## Retry Failed
-
-```bash
 python downloader_final.py --mode retry
-```
-
-Processes games found in the failure logs.
-
-Useful after fixing names or waiting out temporary network/API problems.
-
----
-
-## Only Missing
-
-```bash
 python downloader_final.py --mode missing
-```
-
-Processes games that do not currently have a registered/local cover.
-
-Useful when adding new titles to an existing library.
-
----
-
-## Re-download
-
-```bash
 python downloader_final.py --mode redownload
+python downloader_final.py --mode full --workers 6
 ```
-
-Forces every listed game through the download workflow again.
-
-Use this when you intentionally want to refresh existing artwork.
 
 ---
 
-# ⚙️ Configuration
+## ⚙️ Configuration
 
-Important settings are near the top of `downloader_final.py`.
-
-## Network timeouts
+Key settings near the top of `downloader_final.py`:
 
 ```python
-SEARCH_TIMEOUT = 15
-GRID_TIMEOUT = 20
-DOWNLOAD_TIMEOUT = 30
-```
-
-## Retry behavior
-
-```python
-MAX_RETRIES = 3
-RETRY_BACKOFF = 1.5
-```
-
-## Parallel workers
-
-```python
+# Concurrency
 MAX_WORKERS = 4
-```
+JOB_DELAY = 0.15          # per-worker pacing between requests
 
-Command-line override:
-
-```bash
-python downloader_final.py --workers 6
-```
-
-## Request spacing
-
-```python
-JOB_DELAY = 0.15
-```
-
-The delay is applied inside workers before their actual API work.
-
-## Search matching
-
-```python
+# Search matching
 SEARCH_CANDIDATES = 5
-MIN_MATCH_RATIO = 0.45
-```
+MIN_MATCH_RATIO = 0.45    # below this, a game is "not found" rather than guessed
 
-If no candidate reaches the minimum confidence threshold, the game is rejected rather than guessed.
-
-## Cover sizes
-
-```python
+# Cover sizes
 PREFERRED_SIZES = {(1024, 1024), (512, 512)}
 ALLOW_OTHER_SQUARE_SIZES = True
+
+# Retry behavior
+MAX_RETRIES = 3
+RETRY_BACKOFF = 1.5
+
+# State-file write frequency
+STATE_SAVE_INTERVAL = 5.0  # seconds; always flushed on exit regardless
 ```
 
 ---
 
-# 🧠 Game Matching
+## 🧠 How matching works
 
-Game discovery and artwork selection are two separate steps.
+Discovery and artwork selection are separate steps. First, SteamGridDB autocomplete candidates are collected; the tool then scores each one against your list entry using character similarity, substring containment (`witcher 3` matches *The Witcher 3: Wild Hunt*), and initialisms (`fifa23` matches *FIFA 23*). The highest-scoring candidate above `MIN_MATCH_RATIO` wins.
 
-First, SteamGridDB autocomplete results are collected.
-
-The downloader then scores candidate names instead of simply trusting the server's first result.
-
-It considers:
-
-### Character similarity
-
-Useful for normal spelling variations and small typos.
-
-### Substring matching
-
-Useful for shortened names.
-
-For example:
-
-```text
-witcher 3
-```
-
-can match a longer candidate containing those words.
-
-### Initialisms
-
-Useful for certain abbreviated names.
-
-### Numeric abbreviations
-
-Some glued forms such as numeric editions can match when the candidate contains the same numeric component as a separate word.
-
-The matcher is deliberately conservative. It does not blindly convert arbitrary numbers to Roman numerals and does not fall back to a weak first search result.
+This is deliberately conservative: it won't convert arbitrary digits to Roman numerals, and it never falls back to a weak first result just to avoid a "not found." A wrong cover is harder to notice and fix than a missing one.
 
 ---
 
-# 🖼️ Artwork Selection
-
-Once a game is identified, the downloader requests grid artwork.
-
-Only square candidates are eligible.
-
-A higher internal score is given to candidates with:
-
-- `1024×1024`
-- `512×512`
-- Higher SteamGridDB score
-- Preferred artwork styles
-- Static artwork
-- English metadata when available
-
-The highest-ranked eligible grid is selected.
-
----
-
-# ✅ Image Validation
-
-The program validates the downloaded data before saving it permanently.
-
-It rejects:
-
-- Empty responses
-- Obviously tiny files
-- Unrecognized image data
-- Non-square images
-
-Images are first written to a temporary `.part` file and then moved into their final location.
-
----
-
-# 📂 Output Structure
-
-Example:
+## 📂 Output structure
 
 ```text
 steamgriddb-downloader/
-│
 ├── downloader_final.py
-│
 ├── lists/
 │   ├── ps5.txt
-│   ├── ps4.txt
-│   ├── xbox_one.txt
-│   └── xbox_sx.txt
-│
+│   └── xbox_one.txt
 └── covers/
     ├── _state.json
     ├── _run_log.txt
-    │
+    ├── _shared_covers_report.txt
+    ├── _shared_covers_summary.txt
     ├── ps5/
     │   ├── Astro Bot.png
-    │   ├── Demon's Souls.png
-    │   ├── Marvel's Spider-Man 2.png
-    │   ├── _failed_games.txt
-    │   └── _shared_games.txt
-    │
-    ├── ps4/
-    │   ├── Bloodborne.png
-    │   ├── God of War.png
     │   └── _failed_games.txt
-    │
     └── xbox_one/
         └── ...
 ```
 
 ---
 
-# 💾 Persistent State
+## 📊 Progress and final report
 
-The registry is stored in:
-
-```text
-covers/_state.json
-```
-
-Records can include:
-
-- Official game name
-- List name
-- Local file path
-- SteamGridDB game ID
-- Selected cover URL
-- Cover information
-- Download timestamp
-
-The state file is periodically flushed instead of being rewritten after every individual completion.
-
-A final write is also performed when the processing section exits.
-
----
-
-# ♻️ Duplicate and Shared Covers
-
-The downloader builds a cover index once at startup.
-
-If the same official game already has a cover elsewhere in `covers/`, it can reuse that cover instead of downloading another copy.
-
-Shared-cover information is written to:
-
-```text
-covers/<list-name>/_shared_games.txt
-```
-
-The index is also updated during the current run so newly downloaded covers can be recognized by later jobs.
-
----
-
-# 📝 Failed Games
-
-Every list can have:
-
-```text
-covers/<list-name>/_failed_games.txt
-```
-
-Example:
-
-```text
-Game Name	Not found in SteamGridDB
-Another Game	No valid square (1:1) cover found
-Third Game	Download failed: HTTP 503
-```
-
-Use:
-
-```bash
-python downloader_final.py --mode retry
-```
-
-to retry the recorded failures.
-
----
-
-# 📊 Progress and Final Report
-
-During processing, the program displays:
-
-- Completed/total jobs
-- Current game
-- Processing speed
-- Estimated time remaining
-
-Example:
+Live progress per game:
 
 ```text
 [OK] 120/5000 | Game Name | Speed: 1.48/s | ETA: 55m 12s
 ```
 
-At the end:
+Final summary (printed, and appended to `covers/_run_log.txt`):
 
 ```text
 ==============================================
-              DOWNLOAD COMPLETED
+                 JOB FINISHED
 ==============================================
 Downloaded      : 4700
 Already exists  : 180
 Shared covers   : 75
 Failed          : 45
 Total processed : 5000
-Time            : 56m 31s
-Workers         : 4
+Total time      : 56m 31s
 ==============================================
-```
 
-A human-readable run summary is also appended to:
-
-```text
-covers/_run_log.txt
+Press Enter to exit...
 ```
 
 ---
 
-# 🛠️ Troubleshooting
+## 🛠️ Troubleshooting
 
-## `ModuleNotFoundError: No module named 'requests'`
+| Problem | Fix |
+|---|---|
+| `ModuleNotFoundError: requests` | `python -m pip install requests` |
+| `401 Unauthorized` | Check your `API_KEY` |
+| `403 Forbidden` | Check your SteamGridDB API access |
+| `429 Too Many Requests` | Lower `MAX_WORKERS`, raise `JOB_DELAY`, then re-run with `--mode retry` |
+| Game in `_failed_games.txt` | Check the logged reason; fix the list entry if needed, then `--mode retry` |
+| A weak/ambiguous name isn't matched | Intentional — see [How matching works](#-how-matching-works) |
 
-Run:
-
-```bash
-python -m pip install requests
-```
-
----
-
-## `python is not recognized`
-
-Install Python and add it to PATH, then restart your terminal.
-
-Check:
-
-```bash
-python --version
-```
+**Before publishing:** remove your real API key from the source. Never commit credentials to a public repository.
 
 ---
 
-## `401 Unauthorized`
+## ⚖️ License & Disclaimer
 
-Check the API key configured in:
+Source code may be distributed under the **MIT License** (if a `LICENSE` file is included) — this does **not** grant rights to third-party artwork downloaded from SteamGridDB. Artwork, titles, logos, and trademarks remain subject to their respective owners.
 
-```python
-API_KEY = "..."
-```
+This is an independent automation tool, not affiliated with SteamGridDB. You're responsible for your API usage, credentials, downloaded artwork, and compliance with SteamGridDB's current terms and applicable copyright/trademark law.
 
 ---
 
-## `403 Forbidden`
+## 📚 Links
 
-Check your SteamGridDB API access and credentials.
-
----
-
-## `429 Too Many Requests`
-
-You are being rate limited.
-
-Try reducing:
-
-```python
-MAX_WORKERS = 2
-```
-
-and increasing:
-
-```python
-JOB_DELAY = 0.5
-```
-
-Then use:
-
-```bash
-python downloader_final.py --mode retry
-```
-
-instead of repeatedly running a full collection.
-
----
-
-## A title is placed in `_failed_games.txt`
-
-Check the recorded reason.
-
-If the problem is the name itself, correct the `.txt` entry and run:
-
-```bash
-python downloader_final.py --mode retry
-```
-
----
-
-## The downloader does not guess a weak game match
-
-This is intentional.
-
-If the matcher cannot reach the configured confidence threshold, the title is failed rather than attaching a potentially incorrect cover.
-
----
-
-### 🔐 API key
-
-Before publishing, remove your real SteamGridDB API key from the source.
-
-Never commit credentials to a public repository.
-
----
-
-# ⚖️ License
-
-The source code may be distributed under the **MIT License** when the repository includes an MIT `LICENSE` file.
-
-The source-code license does **not** automatically grant rights to third-party artwork downloaded from SteamGridDB.
-
-SteamGridDB, artwork, game titles, logos, trademarks, and related assets remain subject to their respective owners and applicable terms.
-
----
-
-# ⚠️ Disclaimer
-
-This project is an automation tool and is not affiliated with SteamGridDB unless explicitly stated by the repository owner.
-
-You are responsible for:
-
-- API usage
-- API credentials
-- Downloaded artwork
-- Redistribution of downloaded artwork
-- Compliance with SteamGridDB's current policies and terms
-- Applicable copyright and trademark requirements
-
----
-
-# 📚 Links
-
-- SteamGridDB: https://www.steamgriddb.com/
-- SteamGridDB API: https://www.steamgriddb.com/api/v2
-- Python: https://www.python.org/
-- Requests: https://requests.readthedocs.io/
-
----
-
-The project version refers to this downloader implementation and is independent of the SteamGridDB API version.
+- [SteamGridDB](https://www.steamgriddb.com/) · [API docs](https://www.steamgriddb.com/api/v2)
+- [Python](https://www.python.org/) · [Requests](https://requests.readthedocs.io/)
